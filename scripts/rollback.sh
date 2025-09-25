@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Rollback canary deployment to previous stable version
+# Rollback canary deployment using Lambda aliases
 # Usage: ./scripts/rollback.sh [stage]
 
 set -e
@@ -8,26 +8,63 @@ set -e
 # Default values
 STAGE=${1:-prod}
 REGION=${AWS_REGION:-us-east-1}
+FUNCTION_NAME="canary-aws-ping-${STAGE}-ping"
 
 echo "⚠️  Starting rollback procedure..."
 echo "   Stage: $STAGE"
 echo "   Region: $REGION"
+echo "   Function: $FUNCTION_NAME"
 
-# Get current deployment info
-echo "📋 Getting current deployment status..."
-DEPLOYMENT_ID=$(aws deploy list-deployments \
-  --application-name "canary-aws-ping-$STAGE" \
-  --deployment-group-name "ping-deployment-group" \
-  --include-only-statuses "InProgress" "Ready" \
-  --query 'deployments[0]' \
+# Get current Live version
+LIVE_VERSION=$(aws lambda get-alias \
+  --function-name "$FUNCTION_NAME" \
+  --name "Live" \
+  --query 'FunctionVersion' \
+  --output text \
+  --region "$REGION")
+
+echo "📋 Current Live version: $LIVE_VERSION"
+
+# Check if there's traffic splitting active
+ROUTING_CONFIG=$(aws lambda get-alias \
+  --function-name "$FUNCTION_NAME" \
+  --name "Live" \
+  --query 'RoutingConfig.AdditionalVersionWeights' \
   --output text \
   --region "$REGION" 2>/dev/null || echo "")
 
-if [ -n "$DEPLOYMENT_ID" ] && [ "$DEPLOYMENT_ID" != "None" ]; then
-  echo "🛑 Stopping current deployment: $DEPLOYMENT_ID"
+if [ -n "$ROUTING_CONFIG" ] && [ "$ROUTING_CONFIG" != "None" ]; then
+  echo "� Traffic splitting detected - removing canary traffic"
   
-  # Stop the current deployment
-  aws deploy stop-deployment \
+  # Remove routing configuration (send all traffic to Live version)
+  aws lambda update-alias \
+    --function-name "$FUNCTION_NAME" \
+    --name "Live" \
+    --function-version "$LIVE_VERSION" \
+    --region "$REGION"
+  
+  echo "✅ Rollback completed!"
+  echo "📊 All traffic (100%) now goes to Live version $LIVE_VERSION"
+  
+else
+  echo "ℹ️  No active canary traffic detected"
+  echo "📊 All traffic already goes to Live version $LIVE_VERSION"
+fi
+
+# Get previous versions for manual rollback option
+echo ""
+echo "📚 Recent versions:"
+aws lambda list-versions-by-function \
+  --function-name "$FUNCTION_NAME" \
+  --query 'Versions[-5:].{Version:Version,Description:Description,LastModified:LastModified}' \
+  --output table \
+  --region "$REGION"
+
+echo ""
+echo "💡 To rollback to a specific version:"
+echo "   aws lambda update-alias --function-name $FUNCTION_NAME --name Live --function-version VERSION_NUMBER --region $REGION"
+
+echo "🔍 Monitor with: ./scripts/monitor-canary.sh $STAGE"
     --deployment-id "$DEPLOYMENT_ID" \
     --auto-rollback-enabled \
     --region "$REGION"

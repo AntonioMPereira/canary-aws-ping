@@ -13,39 +13,11 @@ provider:
     SERVERLESS_STAGE: ${self:provider.stage}
     LOG_LEVEL: ${opt:log-level, 'info'}
 
-  iam:
-    role:
-      statements:
-        - Effect: Allow
-          Action:
-            - logs:CreateLogGroup
-            - logs:CreateLogStream
-            - logs:PutLogEvents
-          Resource: !Sub 'arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*'
+  deploymentBucket:
+    name: canary-aws-ping-deployments-${aws:accountId}
 
 custom:
   version: ${file(package.json):version}
-  
-  # LocalStack configuration
-  localstack:
-    stages:
-      - local
-    host: http://localhost
-    edgePort: 4566
-    autostart: true
-    
-  # Canary deployment configuration
-  deploymentSettings:
-    stages:
-      prod:
-        deploymentSettings:
-          type: Canary10Percent5Minutes
-          alarms:
-            - AliasErrorMetricGreaterThanThresholdAlarm
-            - AliasLatencyMetricGreaterThanThresholdAlarm
-          hooks:
-            preTraffic: !Ref PreTrafficValidationFunction
-            postTraffic: !Ref PostTrafficValidationFunction
 
 functions:
   ping:
@@ -57,12 +29,6 @@ functions:
     # Enable versioning for canary deployments
     versioning: true
     
-    # Configure Lambda aliases
-    aliases:
-      live:
-        version: ${self:provider.stage}
-        description: 'Live alias for canary deployments'
-    
     events:
       - http:
           path: ping
@@ -71,11 +37,30 @@ functions:
 
 resources:
   Resources:
-    # CloudWatch Alarms for Canary Deployments
-    AliasErrorMetricGreaterThanThresholdAlarm:
+    # Lambda Alias for stable version
+    PingLambdaAliasLive:
+      Type: AWS::Lambda::Alias
+      Properties:
+        FunctionName: !Ref PingLambdaFunction
+        FunctionVersion: $LATEST
+        Name: Live
+        Description: Stable version for canary deployments
+        
+    # Lambda Alias for canary version  
+    PingLambdaAliasCanary:
+      Type: AWS::Lambda::Alias  
+      Properties:
+        FunctionName: !Ref PingLambdaFunction
+        FunctionVersion: $LATEST
+        Name: Canary
+        Description: Canary version for testing
+
+    # CloudWatch Alarms for monitoring
+    PingErrorAlarm:
       Type: AWS::CloudWatch::Alarm
       Properties:
-        AlarmDescription: Lambda function errors for canary deployment
+        AlarmName: !Sub '${self:service}-${self:provider.stage}-ping-errors'
+        AlarmDescription: Lambda function errors
         ComparisonOperator: GreaterThanThreshold
         EvaluationPeriods: 2
         MetricName: Errors
@@ -86,13 +71,12 @@ resources:
         Dimensions:
           - Name: FunctionName
             Value: !Ref PingLambdaFunction
-          - Name: Resource
-            Value: !Sub "${PingLambdaFunction}:${PingLambdaAlias}"
-        
-    AliasLatencyMetricGreaterThanThresholdAlarm:
-      Type: AWS::CloudWatch::Alarm
+
+    PingLatencyAlarm:
+      Type: AWS::CloudWatch::Alarm  
       Properties:
-        AlarmDescription: Lambda function latency for canary deployment
+        AlarmName: !Sub '${self:service}-${self:provider.stage}-ping-latency'
+        AlarmDescription: Lambda function latency
         ComparisonOperator: GreaterThanThreshold
         EvaluationPeriods: 2
         MetricName: Duration
@@ -103,129 +87,3 @@ resources:
         Dimensions:
           - Name: FunctionName
             Value: !Ref PingLambdaFunction
-          - Name: Resource
-            Value: !Sub "${PingLambdaFunction}:${PingLambdaAlias}"
-
-    # Pre-traffic validation function
-    PreTrafficValidationFunction:
-      Type: AWS::Lambda::Function
-      Properties:
-        FunctionName: !Sub '${self:service}-${self:provider.stage}-pre-traffic-validation'
-        Runtime: nodejs20.x
-        Handler: index.handler
-        Role: !GetAtt PreTrafficValidationRole.Arn
-        Code:
-          ZipFile: |
-            const aws = require('aws-sdk');
-            const codedeploy = new aws.CodeDeploy();
-            
-            exports.handler = async (event) => {
-              console.log('Pre-traffic validation started');
-              
-              try {
-                // Add your pre-traffic validation logic here
-                // For now, just return success
-                
-                await codedeploy.putLifecycleEventHookExecutionStatus({
-                  deploymentId: event.DeploymentId,
-                  lifecycleEventHookExecutionId: event.LifecycleEventHookExecutionId,
-                  status: 'Succeeded'
-                }).promise();
-                
-                console.log('Pre-traffic validation completed successfully');
-              } catch (error) {
-                console.error('Pre-traffic validation failed:', error);
-                
-                await codedeploy.putLifecycleEventHookExecutionStatus({
-                  deploymentId: event.DeploymentId,
-                  lifecycleEventHookExecutionId: event.LifecycleEventHookExecutionId,
-                  status: 'Failed'
-                }).promise();
-              }
-            };
-
-    # Post-traffic validation function
-    PostTrafficValidationFunction:
-      Type: AWS::Lambda::Function
-      Properties:
-        FunctionName: !Sub '${self:service}-${self:provider.stage}-post-traffic-validation'
-        Runtime: nodejs20.x
-        Handler: index.handler
-        Role: !GetAtt PostTrafficValidationRole.Arn
-        Code:
-          ZipFile: |
-            const aws = require('aws-sdk');
-            const codedeploy = new aws.CodeDeploy();
-            
-            exports.handler = async (event) => {
-              console.log('Post-traffic validation started');
-              
-              try {
-                // Add your post-traffic validation logic here
-                // For now, just return success
-                
-                await codedeploy.putLifecycleEventHookExecutionStatus({
-                  deploymentId: event.DeploymentId,
-                  lifecycleEventHookExecutionId: event.LifecycleEventHookExecutionId,
-                  status: 'Succeeded'
-                }).promise();
-                
-                console.log('Post-traffic validation completed successfully');
-              } catch (error) {
-                console.error('Post-traffic validation failed:', error);
-                
-                await codedeploy.putLifecycleEventHookExecutionStatus({
-                  deploymentId: event.DeploymentId,
-                  lifecycleEventHookExecutionId: event.LifecycleEventHookExecutionId,
-                  status: 'Failed'
-                }).promise();
-              }
-            };
-
-    # IAM roles for validation functions
-    PreTrafficValidationRole:
-      Type: AWS::IAM::Role
-      Properties:
-        AssumeRolePolicyDocument:
-          Version: '2012-10-17'
-          Statement:
-            - Effect: Allow
-              Principal:
-                Service: lambda.amazonaws.com
-              Action: sts:AssumeRole
-        ManagedPolicyArns:
-          - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-        Policies:
-          - PolicyName: CodeDeployPolicy
-            PolicyDocument:
-              Version: '2012-10-17'
-              Statement:
-                - Effect: Allow
-                  Action:
-                    - codedeploy:PutLifecycleEventHookExecutionStatus
-                  Resource: '*'
-
-    PostTrafficValidationRole:
-      Type: AWS::IAM::Role
-      Properties:
-        AssumeRolePolicyDocument:
-          Version: '2012-10-17'
-          Statement:
-            - Effect: Allow
-              Principal:
-                Service: lambda.amazonaws.com
-              Action: sts:AssumeRole
-        ManagedPolicyArns:
-          - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
-        Policies:
-          - PolicyName: CodeDeployPolicy
-            PolicyDocument:
-              Version: '2012-10-17'
-              Statement:
-                - Effect: Allow
-                  Action:
-                    - codedeploy:PutLifecycleEventHookExecutionStatus
-                  Resource: '*'
-
-plugins:
-  - serverless-localstack

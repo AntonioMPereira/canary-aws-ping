@@ -1,243 +1,460 @@
-# Canary AWS Ping
+# Canary AWS Ping# Canary AWS Ping
 
-AWS Lambda function with API Gateway canary deployments for ping service using Node.js 20.
 
-## Features
 
-- 🚀 **AWS Lambda** with Node.js 20 runtime
-- 🔄 **API Gateway Canary Deployments** with traffic splitting
-- 📊 **CloudWatch Monitoring** with automatic rollback
-- 🐳 **LocalStack** for local development
-- ⚡ **Serverless Framework 3.16** for deployment
-- 🎯 **Lambda Versioning** with aliases management
+AWS Lambda function with API Gateway canary deployments for ping service using Node.js 20.AWS Lambda function with API Gateway canary deployments for ping service using Node.js 20.
 
-## API Endpoint
 
-```bash
-GET /prod/ping
-```
 
-**Response:**
+## Features## Features
 
-```json
-{
-  "message": "ping v20.x.x",
-  "timestamp": "2025-09-24T10:00:00.000Z",
-  "version": "1.0.0"
-}
-```
 
-## Quick Start
 
-### Prerequisites
+- 🚀 **AWS Lambda** with Node.js 20 runtime- 🚀 **AWS Lambda** with Node.js 20 runtime
 
-- Node.js 20+
-- AWS CLI configured
-- Docker (for LocalStack)
+- 🔄 **API Gateway Canary Deployments** with traffic splitting- 🔄 **API Gateway Canary Deployments** with traffic splitting
+
+- 📊 **CloudWatch Monitoring** with automatic rollback- 📊 **CloudWatch Monitoring** with automatic rollback
+
+- ⚡ **Serverless Framework 3.16** for deployment- ⚡ **Serverless Framework 3.16** for deployment
+
+- 🎯 **Lambda Versioning** with aliases management- 🎯 **Lambda Versioning** with aliases management
+
+
+
+## API Endpoint## API Endpoint
+
+
+
+```bash```bash
+
+GET /{stage}/pingGET /{stage}/ping
+
+``````
+
+
+
+**Response:****Response:**
+
+
+
+```json```json
+
+{{
+
+  "message": "ping v20.x.x",  "message": "ping v20.x.x",
+
+  "timestamp": "2025-01-24T10:00:00.000Z",  "timestamp": "2025-01-24T10:00:00.000Z",
+
+  "version": "1.0.1",  "version": "1.0.1",
+
+  "stage": "prod",  "stage": "prod",
+
+  "region": "us-east-1"  "region": "us-east-1"
+
+}}
+
+``````
+
+
+
+## Quick Start## Quick Start
+
+
+
+### Prerequisites### Prerequisites
+
+
+
+- Node.js 20+- Node.js 20+
+
+- AWS CLI configured with appropriate permissions- AWS CLI configured with appropriate permissions
+
+- Serverless Framework 3.16+
+
+### Installation
 
 ### Installation
 
 ```bash
-npm install
+
+```bashnpm install
+
+npm install```
+
+```npm run test:coverage
+
 ```
 
-### Local Development
+### Testing
+
+### AWS Deployment
 
 ```bash
-# Start LocalStack
-npm run local:start
 
-# Deploy to local
-npm run local:deploy
+# Run unit tests#### Standard Deploy
 
-# Test local endpoint
-curl http://localhost:4566/restapis/{api-id}/local/_user_request_/ping
-```
-
-### Production Deployment
-
-#### Standard Deploy
+npm test
 
 ```bash
-npm run deploy:prod
+
+# Run tests with coveragenpm run deploy:prod
+
+npm run test:coverage```
+
 ```
 
 #### Canary Deploy (10% traffic)
 
+### Deployment
+
 ```bash
-npm run deploy:canary
-```
+
+```bashnpm run deploy:canary
+
+# Deploy to development```
+
+npm run deploy:dev
 
 #### Promote Canary (100% traffic)
 
-```bash
-npm run promote:canary
+# Deploy to production
+
+npm run deploy:prod```bash
+
+```npm run promote:canary
+
 ```
+
+## Canary Deployment
 
 ## 🧪 Testing Guide
 
+### Deploy with Canary
+
 ### **1. Unit Tests**
+
+Deploy a new version with 10% traffic split:
 
 Run the Jest test suite:
 
 ```bash
-# Install dependencies first
+
+npm run deploy:canary```bash
+
+```# Install dependencies first
+
 npm install
 
-# Run all tests
-npm test
+This runs: `./scripts/deploy-canary.sh 10 prod`
 
-# Run tests with coverage
+# Run all tests
+
+### Promote Canarynpm test
+
+
+
+After validating canary performance, promote to 100% traffic:# Run tests with coverage
+
 npm run test -- --coverage
 
-# Run tests in watch mode
-npm run test -- --watch
+```bash
+
+npm run promote:canary# Run tests in watch mode
+
+```npm run test -- --watch
+
 ```
+
+This runs: `./scripts/promote-canary.sh 100 prod`
 
 ### **2. Local Testing with LocalStack**
 
+### Rollback
+
 Test the Lambda function locally:
 
+If issues are detected, rollback to previous version:
+
 ```bash
-# Start LocalStack
-npm run local:start
+
+```bash# Start LocalStack
+
+npm run rollbacknpm run local:start
+
+```
 
 # Wait for LocalStack to be ready (check health)
-curl http://localhost:4566/health
 
-# Deploy to LocalStack
+This runs: `./scripts/rollback.sh prod`curl http://localhost:4566/health
+
+
+
+## Monitoring# Deploy to LocalStack
+
 npm run local:deploy
 
+CloudWatch alarms are automatically configured to monitor:
+
 # Get the local API endpoint
-serverless info --stage local
 
-# Test the local endpoint
+- **Error Rate**: Triggers rollback if errors exceed thresholdserverless info --stage local
+
+- **Latency**: Monitors response times for performance regression
+
+- **Invocation Count**: Tracks traffic distribution between versions# Test the local endpoint
+
 curl http://localhost:4566/restapis/{api-id}/local/_user_request_/ping
-```
 
-### **3. AWS Development Environment Testing**
+## Project Structure```
 
-Test in AWS dev environment:
 
-```bash
-# Deploy to AWS dev stage
-npm run deploy:dev
 
-# Get the dev endpoint
-serverless info --stage dev
+```### **3. AWS Development Environment Testing**
 
-# Test the dev endpoint
-curl https://{api-id}.execute-api.us-east-1.amazonaws.com/dev/ping
-```
+canary-aws-ping/
 
-### **4. Production Canary Testing**
+├── src/Test in AWS dev environment:
 
-Test canary deployment in production:
+│   └── handlers/
 
-```bash
+│       └── ping.js          # Lambda function handler```bash
+
+├── scripts/# Deploy to AWS dev stage
+
+│   ├── deploy-canary.sh     # Canary deployment scriptnpm run deploy:dev
+
+│   ├── promote-canary.sh    # Traffic promotion script
+
+│   ├── rollback.sh          # Rollback script# Get the dev endpoint
+
+│   └── monitor.sh           # Monitoring scriptserverless info --stage dev
+
+├── tests/
+
+│   └── ping.test.js         # Unit tests# Test the dev endpoint
+
+├── serverless.yml           # Infrastructure configurationcurl https://{api-id}.execute-api.us-east-1.amazonaws.com/dev/ping
+
+├── package.json            # Dependencies and scripts```
+
+└── README.md               # This file
+
+```### **4. Production Canary Testing**
+
+
+
+## Environment VariablesTest canary deployment in production:
+
+
+
+Copy `.env.example` to `.env` and configure:```bash
+
 # Deploy canary (10% traffic)
-./scripts/deploy-canary.sh 10 prod
 
-# Monitor the deployment
-./scripts/monitor-canary.sh prod 300
+```bash./scripts/deploy-canary.sh 10 prod
 
-# Test the production endpoint (hits both stable and canary)
-curl https://{api-id}.execute-api.us-east-1.amazonaws.com/prod/ping
+# AWS Configuration
 
-# Run multiple tests to see traffic distribution
-for i in {1..20}; do
-  curl -s https://{api-id}.execute-api.us-east-1.amazonaws.com/prod/ping | jq .message
-  sleep 1
-done
+AWS_REGION=us-east-1# Monitor the deployment
+
+AWS_PROFILE=default./scripts/monitor-canary.sh prod 300
+
+
+
+# Serverless Configuration  # Test the production endpoint (hits both stable and canary)
+
+SERVERLESS_STAGE=devcurl https://{api-id}.execute-api.us-east-1.amazonaws.com/prod/ping
+
+
+
+# Canary Configuration# Run multiple tests to see traffic distribution
+
+CANARY_TRAFFIC_WEIGHT=10for i in {1..20}; do
+
+ERROR_THRESHOLD=5  curl -s https://{api-id}.execute-api.us-east-1.amazonaws.com/prod/ping | jq .message
+
+LATENCY_THRESHOLD_MS=1000  sleep 1
+
+```done
+
 ```
+
+## Scripts
 
 ### **5. Load Testing**
 
+### Canary Management Scripts
+
 Test with higher load to verify canary behavior:
 
+All scripts are located in the `scripts/` directory and handle:
+
 ```bash
-# Install artillery for load testing
-npm install -g artillery
 
-# Create load test configuration
+1. **`deploy-canary.sh`**: Deploys new version with specified traffic percentage# Install artillery for load testing
+
+2. **`promote-canary.sh`**: Increases traffic to canary versionnpm install -g artillery
+
+3. **`rollback.sh`**: Reverts to previous stable version
+
+4. **`monitor.sh`**: Displays real-time metrics and alerts# Create load test configuration
+
 cat > load-test.yml << EOF
-config:
-  target: 'https://{your-api-id}.execute-api.us-east-1.amazonaws.com'
-  phases:
-    - duration: 300
-      arrivalRate: 10
-scenarios:
-  - name: "Ping endpoint"
-    flow:
-      - get:
-          url: "/prod/ping"
-EOF
 
-# Run load test
-artillery run load-test.yml
+### Usage Examplesconfig:
+
+  target: 'https://{your-api-id}.execute-api.us-east-1.amazonaws.com'
+
+```bash  phases:
+
+# Deploy canary with 20% traffic    - duration: 300
+
+./scripts/deploy-canary.sh 20 prod      arrivalRate: 10
+
+scenarios:
+
+# Promote canary to 50% traffic  - name: "Ping endpoint"
+
+./scripts/promote-canary.sh 50 prod    flow:
+
+      - get:
+
+# Full promotion (100% traffic)          url: "/prod/ping"
+
+./scripts/promote-canary.sh 100 prodEOF
+
+
+
+# Emergency rollback# Run load test
+
+./scripts/rollback.sh prodartillery run load-test.yml
+
 ```
 
-### **6. Monitoring During Tests**
+# Monitor deployment
+
+./scripts/monitor.sh prod### **6. Monitoring During Tests**
+
+```
 
 Monitor metrics while testing:
 
+## AWS Resources
+
 ```bash
-# In one terminal - run monitoring
+
+The deployment creates:# In one terminal - run monitoring
+
 ./scripts/monitor-canary.sh prod 600
 
-# In another terminal - run tests
-for i in {1..100}; do
-  curl -s https://{api-id}.execute-api.us-east-1.amazonaws.com/prod/ping
-  sleep 2
+- **Lambda Function**: `canary-aws-ping-{stage}-ping`
+
+- **API Gateway**: REST API with canary deployment# In another terminal - run tests
+
+- **Lambda Aliases**: `Live` and `Canary` for traffic splitting  for i in {1..100}; do
+
+- **CloudWatch Alarms**: Error rate and latency monitoring  curl -s https://{api-id}.execute-api.us-east-1.amazonaws.com/prod/ping
+
+- **IAM Roles**: Execution permissions for Lambda  sleep 2
+
 done
-```
 
-### **7. Error Testing (Rollback Simulation)**
+## Development Workflow```
 
-Test error scenarios and rollback:
 
-```bash
-# 1. Deploy a version with intentional error
+
+1. **Make Changes**: Modify code in `src/handlers/ping.js`### **7. Error Testing (Rollback Simulation)**
+
+2. **Test Locally**: Run `npm test` to validate changes
+
+3. **Deploy Canary**: Use `npm run deploy:canary` for safe deploymentTest error scenarios and rollback:
+
+4. **Monitor**: Check CloudWatch metrics and alarms
+
+5. **Promote**: Use `npm run promote:canary` if metrics are good```bash
+
+6. **Rollback**: Use `npm run rollback` if issues detected# 1. Deploy a version with intentional error
+
 # Edit src/handlers/ping.js to throw an error
-sed -i 's/const nodeVersion = process.version;/throw new Error("Test error");/' src/handlers/ping.js
 
-# 2. Deploy canary with error
-./scripts/deploy-canary.sh 10 prod
+## Securitysed -i 's/const nodeVersion = process.version;/throw new Error("Test error");/' src/handlers/ping.js
 
-# 3. Test - should trigger alarms
+
+
+- Lambda function uses least-privilege IAM roles# 2. Deploy canary with error
+
+- API Gateway has CORS enabled for web clients./scripts/deploy-canary.sh 10 prod
+
+- CloudWatch logs capture all invocations for debugging
+
+- Serverless deployment bucket uses account-specific naming# 3. Test - should trigger alarms
+
 for i in {1..10}; do curl https://{api-id}.execute-api.us-east-1.amazonaws.com/prod/ping; done
 
+## Performance
+
 # 4. Monitor alarms (should trigger)
-./scripts/monitor-canary.sh prod 120
 
-# 5. Rollback when alarms trigger
-./scripts/rollback.sh prod
+- **Cold Start**: ~100-200ms for first invocation./scripts/monitor-canary.sh prod 120
 
-# 6. Restore original code
+- **Warm Response**: ~10-50ms for subsequent calls
+
+- **Memory**: 128MB allocated, typically uses ~30MB# 5. Rollback when alarms trigger
+
+- **Timeout**: 10 seconds configured, typical response <100ms./scripts/rollback.sh prod
+
+
+
+## Troubleshooting# 6. Restore original code
+
 git checkout -- src/handlers/ping.js
-```
 
-### **8. Complete End-to-End Test**
+### Common Issues```
 
-Full canary deployment lifecycle test:
+
+
+1. **Deployment Fails**: Check AWS credentials and permissions### **8. Complete End-to-End Test**
+
+2. **Function Errors**: Review CloudWatch logs for stack traces
+
+3. **High Latency**: Monitor CloudWatch metrics and adjust memoryFull canary deployment lifecycle test:
+
+4. **Canary Issues**: Use rollback script immediately
 
 ```bash
-# 1. Initial deploy
+
+### Debugging Commands# 1. Initial deploy
+
 npm run deploy:prod
 
-# 2. Make a small change (e.g., update version in package.json)
-sed -i 's/"version": "1.0.0"/"version": "1.0.1"/' package.json
+```bash
 
-# 3. Deploy canary
-./scripts/deploy-canary.sh 10 prod
+# View function logs# 2. Make a small change (e.g., update version in package.json)
 
-# 4. Monitor for 5 minutes
-./scripts/monitor-canary.sh prod 300
+serverless logs -f ping --stage prodsed -i 's/"version": "1.0.0"/"version": "1.0.1"/' package.json
+
+
+
+# Check deployment status# 3. Deploy canary
+
+serverless info --stage prod./scripts/deploy-canary.sh 10 prod
+
+
+
+# Manual function invoke# 4. Monitor for 5 minutes
+
+serverless invoke -f ping --stage prod./scripts/monitor-canary.sh prod 300
+
+```
 
 # 5. Promote to 50%
-./scripts/promote-canary.sh 50 prod
 
-# 6. Monitor again
+## License./scripts/promote-canary.sh 50 prod
+
+
+
+MIT License - see LICENSE file for details.# 6. Monitor again
 ./scripts/monitor-canary.sh prod 300
 
 # 7. Promote to 100%
