@@ -1,14 +1,27 @@
 # Canary AWS Ping
 
-AWS Lambda function with API Gateway canary deployments for ping service using Node.js 20.
+AWS Lambda function with **TWO canary deployment approaches** for ping service.
+
+## 🎯 TWO APPROACHES AVAILABLE
+
+### APPROACH 1: Lambda Weighted Routing (Same Runtime)
+- **Use case**: Code changes within same Node.js runtime
+- **Configuration**: `serverless.yml`
+- **Traffic split**: Lambda alias weighted routing
+
+### APPROACH 2: Multi-Runtime Deployment (Different Runtimes)  
+- **Use case**: Node 18 → Node 22 migration
+- **Configuration**: `serverless-multi-runtime.yml`
+- **Traffic split**: API Gateway canary deployment
 
 ## Features
 
-- 🚀 **AWS Lambda** with Node.js 20 runtime
-- 🔄 **API Gateway Canary Deployments** with traffic splitting
+- 🚀 **AWS Lambda** with Node.js 18/20/22 runtime support
+- 🔄 **Two Canary Strategies** (weighted routing + multi-runtime)
 - 📊 **CloudWatch Monitoring** with automatic rollback
 - ⚡ **Serverless Framework 3.16** for deployment
 - 🎯 **Lambda Versioning** with aliases management
+- 🌟 **Runtime Migration** support (Node 18 ↔ Node 22)
 
 ## API Endpoint
 
@@ -27,6 +40,26 @@ GET /{stage}/ping
   "region": "us-east-1"
 }
 ```
+
+## 🤔 WHICH APPROACH TO USE?
+
+### For Code Changes (Same Runtime):
+```bash
+# Use Lambda Weighted Routing (simpler)
+npm run deploy:canary      # Deploy with current approach
+npm run promote:canary     # Promote to 100%
+npm run rollback          # Emergency rollback
+```
+
+### For Runtime Migration (Node 18 → Node 22):
+```bash
+# Use Multi-Runtime Deployment (complex but works)
+npm run deploy:runtime-canary    # 10% Node 22, 90% Node 18
+npm run promote:runtime-canary   # 100% Node 22
+npm run rollback:runtime-canary  # Back to Node 18
+```
+
+**📖 Read [COMPARACAO-ABORDAGENS.md](COMPARACAO-ABORDAGENS.md) for detailed comparison**
 
 ## Quick Start
 
@@ -54,15 +87,53 @@ npm run test:coverage
 
 ### Deployment
 
+#### Standard Deployment (Single Runtime):
 ```bash
 # Deploy to development
 npm run deploy:dev
 
-# Deploy to production
+# Deploy to production  
 npm run deploy:prod
 ```
 
+#### Multi-Runtime Deployment (Node 18 + Node 22):
+```bash
+# Deploy both runtimes to development
+npm run deploy:multi-dev
+
+# Deploy both runtimes to production
+npm run deploy:multi-prod
+```
+
 ## Canary Deployment
+
+### How It Works
+
+#### APPROACH 1: Lambda Alias Weighted Routing
+1. **API Gateway** calls the `Live` alias (via qualifier)
+2. **Live Alias** uses weighted routing to split traffic between versions
+3. **Same Runtime**: All versions use the same Node.js runtime
+
+#### APPROACH 2: Multi-Runtime Canary Deployment  
+1. **Two Lambda Functions**: ping-stable (Node 18) + ping-canary (Node 22)
+2. **API Gateway Canary**: Traffic splitting between different functions
+3. **Different Runtimes**: Each function can use different runtime
+
+### Architectures
+
+**Weighted Routing** (same runtime):
+```
+API Gateway → Live Alias → Version 1 (90%) + Version 2 (10%)
+                ↓              ↓               ↓  
+            Node 20.x      Node 20.x       Node 20.x
+```
+
+**Multi-Runtime** (different runtimes):
+```
+API Gateway → Canary → ping-stable (90%) + ping-canary (10%)
+                ↓           ↓                    ↓
+            Traffic      Node 18.x           Node 22.x
+```
 
 ### Deploy with Canary
 
@@ -72,27 +143,32 @@ Deploy a new version with 10% traffic split:
 npm run deploy:canary
 ```
 
-This runs: `./scripts/deploy-canary.sh 10 prod`
+**What happens:**
+1. Deploys new code with Serverless Framework
+2. Publishes new Lambda version (e.g., Version 2)
+3. Updates `Live` alias with weighted routing: 90% → Version 1, 10% → Version 2
 
 ### Promote Canary
 
-After validating canary performance, promote to 100% traffic:
+Gradually increase traffic to canary version:
 
 ```bash
+# Increase to 50% traffic
+./scripts/promote-canary.sh 50 prod
+
+# Full promotion (100% traffic)  
 npm run promote:canary
 ```
 
-This runs: `./scripts/promote-canary.sh 100 prod`
-
 ### Rollback
 
-If issues are detected, rollback to previous version:
+Remove canary traffic and revert to stable version:
 
 ```bash
 npm run rollback
 ```
 
-This runs: `./scripts/rollback.sh prod`
+**Note:** Rollback removes weighted routing configuration, sending 100% traffic to the stable version.
 
 ## Monitoring
 
@@ -141,6 +217,12 @@ LATENCY_THRESHOLD_MS=1000
 
 ## Scripts Usage
 
+### Prerequisites
+
+- `bc` command for decimal calculations
+- `jq` command for JSON parsing
+- AWS CLI configured with Lambda permissions
+
 ### Canary Management
 
 ```bash
@@ -159,6 +241,13 @@ LATENCY_THRESHOLD_MS=1000
 # Monitor deployment
 ./scripts/monitor-canary.sh prod
 ```
+
+### Script Details
+
+- **deploy-canary.sh**: Publishes new version + configures weighted routing
+- **promote-canary.sh**: Adjusts traffic percentages or fully promotes
+- **rollback.sh**: Removes weighted routing, reverts to stable
+- **monitor-canary.sh**: Shows CloudWatch metrics and alias status
 
 ## AWS Resources Created
 

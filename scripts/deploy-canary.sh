@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Canary deployment script using Lambda aliases
+# Canary deployment script using Lambda alias weighted routing
 # Usage: ./scripts/deploy-canary.sh [weight] [stage]
 
 set -e
@@ -23,46 +23,41 @@ if [ "$WEIGHT" -lt 1 ] || [ "$WEIGHT" -gt 100 ]; then
   exit 1
 fi
 
-# Deploy new version
-echo "📦 Deploying new version..."
+# Step 1: Deploy new code with Serverless
+echo "📦 Deploying new version with Serverless..."
 serverless deploy \
   --stage "$STAGE" \
   --region "$REGION" \
   --verbose
 
-# Get the new version number
-NEW_VERSION=$(aws lambda list-versions-by-function \
+# Step 2: Publish new Lambda version  
+echo "🔖 Publishing new Lambda version..."
+NEW_VERSION=$(aws lambda publish-version \
   --function-name "$FUNCTION_NAME" \
-  --query 'Versions[-1].Version' \
+  --description "Canary deployment $(date -u +%Y-%m-%dT%H:%M:%S)" \
+  --query 'Version' \
   --output text \
   --region "$REGION")
 
-echo "✅ New version deployed: $NEW_VERSION"
+echo "✅ New version published: $NEW_VERSION"
 
-# Update Canary alias to point to new version
-echo "🔄 Updating Canary alias to version $NEW_VERSION..."
-aws lambda update-alias \
-  --function-name "$FUNCTION_NAME" \
-  --name "Canary" \
-  --function-version "$NEW_VERSION" \
-  --region "$REGION"
-
-# Configure traffic splitting
+# Step 3: Configure weighted routing on Live alias
 LIVE_WEIGHT=$((100 - WEIGHT))
 
 echo "📊 Configuring traffic splitting..."
-echo "   Live (stable): ${LIVE_WEIGHT}%"  
-echo "   Canary (new): ${WEIGHT}%"
+echo "   Live (current): ${LIVE_WEIGHT}%"  
+echo "   Canary (v${NEW_VERSION}): ${WEIGHT}%"
 
-# Update alias with traffic splitting
+# Update Live alias with weighted routing
 aws lambda update-alias \
   --function-name "$FUNCTION_NAME" \
   --name "Live" \
-  --routing-config "AdditionalVersionWeights={\"$NEW_VERSION\":$WEIGHT}" \
+  --routing-config "AdditionalVersionWeights={\"$NEW_VERSION\":$(printf "%.2f" $(echo "scale=2; $WEIGHT / 100" | bc))}" \
   --region "$REGION"
 
 echo "✅ Canary deployment completed!"
 echo "🔍 Monitor with: ./scripts/monitor-canary.sh $STAGE"
+echo "🚀 Promote with: ./scripts/promote-canary.sh 50 $STAGE"
 
 if [ $? -eq 0 ]; then
   echo "✅ Canary deployment successful!"

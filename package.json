@@ -9,11 +9,21 @@
   "scripts": {
     "test": "jest",
     "test:coverage": "jest --coverage",
+    
     "deploy:dev": "serverless deploy --stage dev",
     "deploy:prod": "serverless deploy --stage prod",
+    
     "deploy:canary": "./scripts/deploy-canary.sh 10 prod",
     "promote:canary": "./scripts/promote-canary.sh 100 prod",
-    "rollback": "./scripts/rollback.sh prod"
+    "rollback": "./scripts/rollback.sh prod",
+    
+    "deploy:multi-dev": "serverless deploy --config serverless-multi-runtime.yml --stage dev",
+    "deploy:multi-prod": "serverless deploy --config serverless-multi-runtime.yml --stage prod",
+    
+    "deploy:runtime-canary": "./scripts/deploy-runtime-canary.sh 10 prod",
+    "promote:runtime-canary": "./scripts/promote-runtime-canary.sh 100 prod",
+    "rollback:runtime-canary": "./scripts/rollback-runtime-canary.sh prod",
+    "monitor:runtime-canary": "./scripts/monitor-runtime-canary.sh prod"
   },
   "dependencies": {},
   "devDependencies": {

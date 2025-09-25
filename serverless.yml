@@ -26,34 +26,34 @@ functions:
     timeout: 10
     memorySize: 128
     
-    # Enable versioning for canary deployments
-    versioning: true
-    
+    # CRITICAL: Use qualifier to make API Gateway call the alias
     events:
       - http:
           path: ping
           method: get
           cors: true
+          # This makes API Gateway call the Live alias instead of $LATEST
+          qualifier: Live
 
 resources:
   Resources:
-    # Lambda Alias for stable version
+    # Lambda Version (published version for stable releases)
+    PingLambdaVersion:
+      Type: AWS::Lambda::Version
+      Properties:
+        FunctionName: !Ref PingLambdaFunction
+        Description: 'Version for canary deployment'
+        
+    # Live Alias with weighted routing capability
     PingLambdaAliasLive:
       Type: AWS::Lambda::Alias
       Properties:
         FunctionName: !Ref PingLambdaFunction
-        FunctionVersion: $LATEST
+        # Point to a specific version (not $LATEST)
+        FunctionVersion: !GetAtt PingLambdaVersion.Version
         Name: Live
-        Description: Stable version for canary deployments
-        
-    # Lambda Alias for canary version  
-    PingLambdaAliasCanary:
-      Type: AWS::Lambda::Alias  
-      Properties:
-        FunctionName: !Ref PingLambdaFunction
-        FunctionVersion: $LATEST
-        Name: Canary
-        Description: Canary version for testing
+        Description: 'Production alias with canary routing support'
+        # RoutingConfig will be updated by scripts for canary deployment
 
     # CloudWatch Alarms for monitoring
     PingErrorAlarm:

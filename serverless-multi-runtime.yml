@@ -1,0 +1,257 @@
+service: canary-aws-ping-multi
+
+frameworkVersion: '3'
+
+provider:
+  name: aws
+  runtime: nodejs20.x  # Default runtime (will be overridden per function)
+  stage: ${opt:stage, 'dev'}
+  region: ${opt:region, 'us-east-1'}
+  
+  environment:
+    APP_VERSION: ${self:custom.version}
+    SERVERLESS_STAGE: ${self:provider.stage}
+    LOG_LEVEL: ${opt:log-level, 'info'}
+
+  deploymentBucket:
+    name: canary-aws-ping-multi-deployments-${aws:accountId}
+
+custom:
+  version: ${file(package.json):version}
+  
+  # Stage variables for API Gateway canary deployment
+  stageVariables:
+    stable: ${self:provider.stage}
+    canary: ${self:provider.stage}
+
+functions:
+  # Stable function (Node 18)
+  ping-stable:
+    name: ping-stable-${self:provider.stage}
+    runtime: nodejs18.x
+    handler: src/handlers/ping.handler
+    description: 'Ping service with Node.js 18 runtime (stable)'
+    timeout: 10
+    memorySize: 128
+    environment:
+      RUNTIME_TYPE: stable
+      NODE_VERSION: 18
+    # NO HTTP events - managed by API Gateway
+
+  # Canary function (Node 22)  
+  ping-canary:
+    name: ping-canary-${self:provider.stage}
+    runtime: nodejs22.x
+    handler: src/handlers/ping.handler
+    description: 'Ping service with Node.js 22 runtime (canary)'
+    timeout: 10
+    memorySize: 128
+    environment:
+      RUNTIME_TYPE: canary
+      NODE_VERSION: 22
+    # NO HTTP events - managed by API Gateway
+
+resources:
+  Resources:
+    # REST API
+    MultiRuntimeApiGateway:
+      Type: AWS::ApiGateway::RestApi
+      Properties:
+        Name: ${self:service}-${self:provider.stage}
+        Description: Multi-runtime canary deployment API
+        EndpointConfiguration:
+          Types:
+            - REGIONAL
+
+    # /ping resource
+    PingResource:
+      Type: AWS::ApiGateway::Resource
+      Properties:
+        RestApiId: !Ref MultiRuntimeApiGateway
+        ParentId: !GetAtt MultiRuntimeApiGateway.RootResourceId
+        PathPart: ping
+
+    # GET /ping method
+    PingMethod:
+      Type: AWS::ApiGateway::Method
+      Properties:
+        RestApiId: !Ref MultiRuntimeApiGateway
+        ResourceId: !Ref PingResource
+        HttpMethod: GET
+        AuthorizationType: NONE
+        Integration:
+          Type: AWS_PROXY
+          IntegrationHttpMethod: POST
+          Uri: !Sub 
+            - arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${StableFunction}/invocations
+            - StableFunction: !GetAtt PingDashstableLambdaFunction.Arn
+        MethodResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Origin: true
+
+    # OPTIONS method for CORS
+    PingOptionsMethod:
+      Type: AWS::ApiGateway::Method
+      Properties:
+        RestApiId: !Ref MultiRuntimeApiGateway
+        ResourceId: !Ref PingResource
+        HttpMethod: OPTIONS
+        AuthorizationType: NONE
+        Integration:
+          Type: MOCK
+          IntegrationResponses:
+            - StatusCode: 200
+              ResponseParameters:
+                method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+                method.response.header.Access-Control-Allow-Methods: "'GET,OPTIONS'"
+                method.response.header.Access-Control-Allow-Origin: "'*'"
+              ResponseTemplates:
+                application/json: ''
+          RequestTemplates:
+            application/json: '{"statusCode": 200}'
+        MethodResponses:
+          - StatusCode: 200
+            ResponseParameters:
+              method.response.header.Access-Control-Allow-Headers: true
+              method.response.header.Access-Control-Allow-Methods: true
+              method.response.header.Access-Control-Allow-Origin: true
+
+    # Deployment
+    ApiGatewayDeployment:
+      Type: AWS::ApiGateway::Deployment
+      DependsOn:
+        - PingMethod
+        - PingOptionsMethod
+      Properties:
+        RestApiId: !Ref MultiRuntimeApiGateway
+        Description: Multi-runtime deployment
+
+    # Stage with canary deployment capabilities
+    ApiGatewayStage:
+      Type: AWS::ApiGateway::Stage
+      Properties:
+        RestApiId: !Ref MultiRuntimeApiGateway
+        DeploymentId: !Ref ApiGatewayDeployment
+        StageName: ${self:provider.stage}
+        Description: Production stage with canary deployment support
+        Variables:
+          # Stage variables that scripts can modify
+          runtimeType: stable  # stable or canary
+        # Canary settings (initially disabled)
+        # CanarySettings will be managed by deployment scripts
+
+    # Lambda permissions for stable function
+    StableLambdaApiGatewayPermission:
+      Type: AWS::Lambda::Permission
+      Properties:
+        FunctionName: !GetAtt PingDashstableLambdaFunction.Arn
+        Action: lambda:InvokeFunction
+        Principal: apigateway.amazonaws.com
+        SourceArn: !Sub "${MultiRuntimeApiGateway}/*/GET/ping"
+
+    # Lambda permissions for canary function
+    CanaryLambdaApiGatewayPermission:
+      Type: AWS::Lambda::Permission
+      Properties:
+        FunctionName: !GetAtt PingDashcanaryLambdaFunction.Arn
+        Action: lambda:InvokeFunction
+        Principal: apigateway.amazonaws.com
+        SourceArn: !Sub "${MultiRuntimeApiGateway}/*/GET/ping"
+
+    # CloudWatch Alarms for stable function
+    StablePingErrorAlarm:
+      Type: AWS::CloudWatch::Alarm
+      Properties:
+        AlarmName: !Sub '${self:service}-${self:provider.stage}-stable-errors'
+        AlarmDescription: Stable function errors
+        ComparisonOperator: GreaterThanThreshold
+        EvaluationPeriods: 2
+        MetricName: Errors
+        Namespace: AWS/Lambda
+        Period: 60
+        Statistic: Sum
+        Threshold: 0
+        Dimensions:
+          - Name: FunctionName
+            Value: !Ref PingDashstableLambdaFunction
+
+    StablePingLatencyAlarm:
+      Type: AWS::CloudWatch::Alarm  
+      Properties:
+        AlarmName: !Sub '${self:service}-${self:provider.stage}-stable-latency'
+        AlarmDescription: Stable function latency
+        ComparisonOperator: GreaterThanThreshold
+        EvaluationPeriods: 2
+        MetricName: Duration
+        Namespace: AWS/Lambda
+        Period: 60
+        Statistic: Average
+        Threshold: 1000
+        Dimensions:
+          - Name: FunctionName
+            Value: !Ref PingDashstableLambdaFunction
+
+    # CloudWatch Alarms for canary function
+    CanaryPingErrorAlarm:
+      Type: AWS::CloudWatch::Alarm
+      Properties:
+        AlarmName: !Sub '${self:service}-${self:provider.stage}-canary-errors'
+        AlarmDescription: Canary function errors
+        ComparisonOperator: GreaterThanThreshold
+        EvaluationPeriods: 2
+        MetricName: Errors
+        Namespace: AWS/Lambda
+        Period: 60
+        Statistic: Sum
+        Threshold: 0
+        Dimensions:
+          - Name: FunctionName
+            Value: !Ref PingDashcanaryLambdaFunction
+
+    CanaryPingLatencyAlarm:
+      Type: AWS::CloudWatch::Alarm  
+      Properties:
+        AlarmName: !Sub '${self:service}-${self:provider.stage}-canary-latency'
+        AlarmDescription: Canary function latency
+        ComparisonOperator: GreaterThanThreshold
+        EvaluationPeriods: 2
+        MetricName: Duration
+        Namespace: AWS/Lambda
+        Period: 60
+        Statistic: Average
+        Threshold: 1000
+        Dimensions:
+          - Name: FunctionName
+            Value: !Ref PingDashcanaryLambdaFunction
+
+  Outputs:
+    ApiGatewayRestApiId:
+      Description: API Gateway REST API ID
+      Value: !Ref MultiRuntimeApiGateway
+      Export:
+        Name: ${self:service}-${self:provider.stage}-api-id
+        
+    ApiGatewayRootResourceId:
+      Description: API Gateway root resource ID
+      Value: !GetAtt MultiRuntimeApiGateway.RootResourceId
+      Export:
+        Name: ${self:service}-${self:provider.stage}-root-resource-id
+
+    StableFunctionArn:
+      Description: Stable function ARN (Node 18)
+      Value: !GetAtt PingDashstableLambdaFunction.Arn
+      Export:
+        Name: ${self:service}-${self:provider.stage}-stable-function-arn
+        
+    CanaryFunctionArn:
+      Description: Canary function ARN (Node 22)
+      Value: !GetAtt PingDashcanaryLambdaFunction.Arn
+      Export:
+        Name: ${self:service}-${self:provider.stage}-canary-function-arn
+
+    ApiEndpoint:
+      Description: API Gateway endpoint URL
+      Value: !Sub "https://${MultiRuntimeApiGateway}.execute-api.${AWS::Region}.amazonaws.com/${self:provider.stage}"
+      Export:
+        Name: ${self:service}-${self:provider.stage}-endpoint
